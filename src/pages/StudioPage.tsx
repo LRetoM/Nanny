@@ -1265,8 +1265,6 @@ export function StudioPage() {
   const canMoveSelectedPieceUp = selectedPieceIndex >= 0 && selectedPieceIndex < historyState.doc.pieces.length - 1
   const canMoveSelectedPieceDown = selectedPieceIndex > 0
 
-  const hasLibraryContent = libraryStore.items.length > 0
-
   return (
     <main className="page studio-page">
       <section className="info-card">
