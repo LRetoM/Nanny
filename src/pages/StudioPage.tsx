@@ -43,8 +43,13 @@ interface PieceNodeProps {
   assignRef: (pieceId: string, node: KonvaGroup | null) => void
   onSelect: (pieceId: string) => void
   onDragEnd: (pieceId: string, x: number, y: number) => void
-  onTransformEnd: (pieceId: string, x: number, y: number, scale: number) => void
+  onTransformEnd: (pieceId: string, x: number, y: number, scale: number, rotation: number) => void
   onDelete: (pieceId: string) => void
+  onMoveLayerUp: (pieceId: string) => void
+  onMoveLayerDown: (pieceId: string) => void
+  onRotatePiece: (pieceId: string) => void
+  canMoveLayerUp: boolean
+  canMoveLayerDown: boolean
 }
 
 const INITIAL_DOC: StudioDoc = {
@@ -68,6 +73,11 @@ const PIECE_OFFSETS: Point[] = [
 
 const SCISSOR_CLOSE_DISTANCE_MOUSE = 34
 const SCISSOR_CLOSE_DISTANCE_TOUCH = 56
+const TABLET_BREAKPOINT = 1180
+const FIXED_TABLET_STAGE = {
+  width: 720,
+  height: 520,
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -127,9 +137,14 @@ function parseStoredStudioDoc(): StudioDoc | null {
       )
     })
 
+    const piecesWithRotation = normalizedPieces.map((piece) => ({
+      ...piece,
+      rotation: isFiniteNumber(piece.rotation) ? piece.rotation : 0,
+    }))
+
     return {
       headShape: normalizeHeadShape(parsed.headShape),
-      pieces: normalizedPieces,
+      pieces: piecesWithRotation,
     }
   } catch {
     return null
@@ -151,8 +166,13 @@ function distance(a: Point, b: Point): number {
 }
 
 function isInsidePiece(point: Point, piece: StudioPiece): boolean {
-  const localX = (point.x - piece.x) / piece.scale
-  const localY = (point.y - piece.y) / piece.scale
+  const radians = -((piece.rotation ?? 0) * Math.PI) / 180
+  const translatedX = point.x - piece.x
+  const translatedY = point.y - piece.y
+  const rotatedX = translatedX * Math.cos(radians) - translatedY * Math.sin(radians)
+  const rotatedY = translatedX * Math.sin(radians) + translatedY * Math.cos(radians)
+  const localX = rotatedX / piece.scale
+  const localY = rotatedY / piece.scale
   return localX >= 0 && localX <= piece.width && localY >= 0 && localY <= piece.height
 }
 
@@ -299,12 +319,19 @@ function PieceNode({
   onDragEnd,
   onTransformEnd,
   onDelete,
+  onMoveLayerUp,
+  onMoveLayerDown,
+  onRotatePiece,
+  canMoveLayerUp,
+  canMoveLayerDown,
 }: PieceNodeProps) {
   const image = useLoadedImage(piece.imageUrl)
   const trashIcon = useLoadedImage('/images/tool-trash.svg')
   const clipPoints = piece.clipPoints ?? []
   const BTN = 36
   const GAP = 6
+  const CONTROL_GAP = 6
+  const controlsWidth = BTN * 3 + CONTROL_GAP * 2
 
   return (
     <Group
@@ -315,6 +342,7 @@ function PieceNode({
       y={piece.y}
       scaleX={piece.scale}
       scaleY={piece.scale}
+      rotation={piece.rotation ?? 0}
       draggable={tool === 'hand'}
       onPointerDown={(event) => {
         if (tool === 'hand') {
@@ -330,7 +358,7 @@ function PieceNode({
       }}
       onTransformEnd={(event) => {
         const node = event.target
-        onTransformEnd(piece.id, node.x(), node.y(), clamp(node.scaleX(), 0.05, 1.5))
+        onTransformEnd(piece.id, node.x(), node.y(), clamp(node.scaleX(), 0.05, 1.5), node.rotation())
       }}
       onDragEnd={(event) => {
         onDragEnd(piece.id, event.target.x(), event.target.y())
@@ -363,40 +391,124 @@ function PieceNode({
             strokeScaleEnabled={false}
           />
           {tool === 'hand' ? (
-            <Group
-              x={piece.width + GAP / piece.scale}
-              y={-(BTN + GAP) / piece.scale}
-              scaleX={1 / piece.scale}
-              scaleY={1 / piece.scale}
-              onPointerDown={(event) => {
-                event.cancelBubble = true
-              }}
-              onClick={(event) => {
-                event.cancelBubble = true
-                onDelete(piece.id)
-              }}
-              onTap={(event) => {
-                event.cancelBubble = true
-                onDelete(piece.id)
-              }}
-            >
-              <Rect
-                width={BTN}
-                height={BTN}
-                cornerRadius={10}
-                fill="#fff2ef"
-                stroke="#cc4e3a"
-                strokeWidth={2}
-                shadowColor="#7f1f10"
-                shadowBlur={8}
-                shadowOpacity={0.25}
-              />
-              {trashIcon ? (
-                <KonvaImage image={trashIcon} x={4} y={4} width={28} height={28} />
-              ) : (
-                <Text text="🗑" x={5} y={4} fontSize={26} />
-              )}
-            </Group>
+            <>
+              <Group
+                x={piece.width / 2 - controlsWidth / (2 * piece.scale)}
+                y={-(BTN + GAP) / piece.scale}
+                scaleX={1 / piece.scale}
+                scaleY={1 / piece.scale}
+                onPointerDown={(event) => {
+                  event.cancelBubble = true
+                }}
+              >
+                <Group
+                  onClick={(event) => {
+                    event.cancelBubble = true
+                    onMoveLayerUp(piece.id)
+                  }}
+                  onTap={(event) => {
+                    event.cancelBubble = true
+                    onMoveLayerUp(piece.id)
+                  }}
+                >
+                  <Rect
+                    width={BTN}
+                    height={BTN}
+                    cornerRadius={10}
+                    fill={canMoveLayerUp ? '#eef7ff' : '#f1f1f1'}
+                    stroke={canMoveLayerUp ? '#2d7db6' : '#b9b9b9'}
+                    strokeWidth={2}
+                    shadowColor="#275676"
+                    shadowBlur={6}
+                    shadowOpacity={0.18}
+                  />
+                  <Text text="↑" x={12} y={3} fontSize={26} fill={canMoveLayerUp ? '#245f8a' : '#8d8d8d'} />
+                </Group>
+                <Group
+                  x={BTN + CONTROL_GAP}
+                  onClick={(event) => {
+                    event.cancelBubble = true
+                    onRotatePiece(piece.id)
+                  }}
+                  onTap={(event) => {
+                    event.cancelBubble = true
+                    onRotatePiece(piece.id)
+                  }}
+                >
+                  <Rect
+                    width={BTN}
+                    height={BTN}
+                    cornerRadius={10}
+                    fill="#eef7ff"
+                    stroke="#2d7db6"
+                    strokeWidth={2}
+                    shadowColor="#275676"
+                    shadowBlur={6}
+                    shadowOpacity={0.18}
+                  />
+                  <Text text="↻" x={8} y={4} fontSize={24} fill="#245f8a" />
+                </Group>
+                <Group
+                  x={BTN * 2 + CONTROL_GAP * 2}
+                  onClick={(event) => {
+                    event.cancelBubble = true
+                    onMoveLayerDown(piece.id)
+                  }}
+                  onTap={(event) => {
+                    event.cancelBubble = true
+                    onMoveLayerDown(piece.id)
+                  }}
+                >
+                  <Rect
+                    width={BTN}
+                    height={BTN}
+                    cornerRadius={10}
+                    fill={canMoveLayerDown ? '#eef7ff' : '#f1f1f1'}
+                    stroke={canMoveLayerDown ? '#2d7db6' : '#b9b9b9'}
+                    strokeWidth={2}
+                    shadowColor="#275676"
+                    shadowBlur={6}
+                    shadowOpacity={0.18}
+                  />
+                  <Text text="↓" x={12} y={3} fontSize={26} fill={canMoveLayerDown ? '#245f8a' : '#8d8d8d'} />
+                </Group>
+              </Group>
+
+              <Group
+                x={piece.width + GAP / piece.scale}
+                y={-(BTN + GAP) / piece.scale}
+                scaleX={1 / piece.scale}
+                scaleY={1 / piece.scale}
+                onPointerDown={(event) => {
+                  event.cancelBubble = true
+                }}
+                onClick={(event) => {
+                  event.cancelBubble = true
+                  onDelete(piece.id)
+                }}
+                onTap={(event) => {
+                  event.cancelBubble = true
+                  onDelete(piece.id)
+                }}
+              >
+                <Rect
+                  width={BTN}
+                  height={BTN}
+                  cornerRadius={10}
+                  fill="#fff2ef"
+                  stroke="#cc4e3a"
+                  strokeWidth={2}
+                  shadowColor="#7f1f10"
+                  shadowBlur={8}
+                  shadowOpacity={0.25}
+                />
+                {trashIcon ? (
+                  <KonvaImage image={trashIcon} x={4} y={4} width={28} height={28} />
+                ) : (
+                  <Text text="🗑" x={5} y={4} fontSize={26} />
+                )}
+              </Group>
+            </>
           ) : null}
         </>
       ) : null}
@@ -451,7 +563,6 @@ export function StudioPage() {
   const transformerRef = useRef<KonvaTransformer | null>(null)
   const pieceNodeRefs = useRef<Record<string, KonvaGroup | null>>({})
   const stageContainerRef = useRef<HTMLDivElement | null>(null)
-  const panStateRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const scissorCloseDistanceRef = useRef<number>(SCISSOR_CLOSE_DISTANCE_MOUSE)
   const currentDocRef = useRef<StudioDoc>(INITIAL_DOC)
   const isCutProcessingRef = useRef(false)
@@ -511,22 +622,6 @@ export function StudioPage() {
   const selectedPieceIndex = useMemo(
     () => historyState.doc.pieces.findIndex((piece) => piece.id === effectiveSelectedPieceId),
     [effectiveSelectedPieceId, historyState.doc.pieces],
-  )
-
-  const layersTopFirst = useMemo(() => {
-    const total = historyState.doc.pieces.length
-    return [...historyState.doc.pieces]
-      .map((piece, index) => ({
-        piece,
-        index,
-        displayOrder: total - index,
-      }))
-      .reverse()
-  }, [historyState.doc.pieces])
-
-  const categoryItems = useMemo(
-    () => libraryStore.items.filter((item) => item.category === activeCategory),
-    [activeCategory, libraryStore.items],
   )
 
   const scissorCanClose = useMemo(
@@ -622,8 +717,13 @@ export function StudioPage() {
       if (!container) {
         return
       }
-      const nextWidth = Math.max(360, Math.floor(container.clientWidth))
-      const nextHeight = clamp(Math.floor(window.innerHeight * 0.67), 420, 760)
+      if (window.innerWidth <= TABLET_BREAKPOINT) {
+        setStageSize(FIXED_TABLET_STAGE)
+        return
+      }
+
+      const nextWidth = Math.max(640, Math.floor(container.clientWidth))
+      const nextHeight = clamp(Math.floor(window.innerHeight * 0.67), 520, 760)
       setStageSize({ width: nextWidth, height: nextHeight })
     }
 
@@ -654,6 +754,7 @@ export function StudioPage() {
       width: item.width,
       height: item.height,
       scale: clamp(fitScale, 0.06, 0.75),
+      rotation: 0,
       x: headArea.x + headArea.width / 2 - (item.width * fitScale) / 2 + offset.x,
       y: headArea.y + headArea.height / 2 - (item.height * fitScale) / 2 + offset.y,
     }
@@ -672,7 +773,7 @@ export function StudioPage() {
     }))
   }
 
-  const transformPiece = (pieceId: string, x: number, y: number, scale: number) => {
+  const transformPiece = (pieceId: string, x: number, y: number, scale: number, rotation: number) => {
     commitDoc((doc) => ({
       ...doc,
       pieces: doc.pieces.map((piece) =>
@@ -682,6 +783,7 @@ export function StudioPage() {
               x,
               y,
               scale: clamp(scale, 0.05, 1.5),
+              rotation,
             }
           : piece,
       ),
@@ -979,6 +1081,7 @@ export function StudioPage() {
         width: selectedCrop.canvas.width,
         height: selectedCrop.canvas.height,
         scale: sourcePiece.scale,
+        rotation: sourcePiece.rotation ?? 0,
       }
 
       const remainingPieceNew: StudioPiece = {
@@ -992,6 +1095,7 @@ export function StudioPage() {
         width: remainingCrop.canvas.width,
         height: remainingCrop.canvas.height,
         scale: sourcePiece.scale,
+        rotation: sourcePiece.rotation ?? 0,
       }
 
       commitDoc((doc) => {
@@ -1028,20 +1132,8 @@ export function StudioPage() {
       return
     }
 
-    if (tool === 'hand') {
-      const pointer = stage.getPointerPosition()
-      if (!pointer) {
-        return
-      }
-      if (event.target === stage || event.target.name() === 'workspace-bg') {
-        panStateRef.current = {
-          startX: pointer.x,
-          startY: pointer.y,
-          originX: camera.x,
-          originY: camera.y,
-        }
-        setSelectedPieceId(null)
-      }
+    if (tool === 'hand' && (event.target === stage || event.target.name() === 'workspace-bg')) {
+      setSelectedPieceId(null)
     }
   }
 
@@ -1055,25 +1147,12 @@ export function StudioPage() {
       continueScissorDraw(stage)
       return
     }
-
-    if (tool === 'hand' && panStateRef.current) {
-      const pointer = stage.getPointerPosition()
-      if (!pointer) {
-        return
-      }
-      setCamera((previous) => ({
-        ...previous,
-        x: panStateRef.current ? panStateRef.current.originX + (pointer.x - panStateRef.current.startX) : previous.x,
-        y: panStateRef.current ? panStateRef.current.originY + (pointer.y - panStateRef.current.startY) : previous.y,
-      }))
-    }
   }
 
   const onStagePointerUp = () => {
     if (tool === 'scissors' && isDrawingScissor) {
       void finishScissorDraw(true)
     }
-    panStateRef.current = null
   }
 
   undoRef.current = undo
@@ -1165,36 +1244,6 @@ export function StudioPage() {
     }
   }, [])
 
-  const onWheel = (event: KonvaEventObject<WheelEvent>) => {
-    const hasZoomModifier = event.evt.ctrlKey || event.evt.metaKey
-    if (!hasZoomModifier) {
-      return
-    }
-
-    event.evt.preventDefault()
-    const stage = stageRef.current
-    if (!stage) {
-      return
-    }
-    const pointer = stage.getPointerPosition()
-    if (!pointer) {
-      return
-    }
-
-    const zoomDelta = -event.evt.deltaY * 0.0016
-    const nextScale = camera.scale * Math.exp(zoomDelta)
-    const clampedScale = clamp(nextScale, 0.5, 2.4)
-
-    const worldX = (pointer.x - camera.x) / camera.scale
-    const worldY = (pointer.y - camera.y) / camera.scale
-
-    setCamera({
-      scale: clampedScale,
-      x: pointer.x - worldX * clampedScale,
-      y: pointer.y - worldY * clampedScale,
-    })
-  }
-
   const zoomByButton = (delta: number) => {
     const centerPoint = { x: stageSize.width / 2, y: stageSize.height / 2 }
     const nextScale = clamp(camera.scale + delta, 0.5, 2.4)
@@ -1252,13 +1301,18 @@ export function StudioPage() {
     setSelectedPieceId(pieceId)
   }
 
-  const movePieceToFrontById = (pieceId: string) => {
-    movePieceToLayerIndex(pieceId, historyState.doc.pieces.length - 1)
-    setSelectedPieceId(pieceId)
-  }
-
-  const movePieceToBackById = (pieceId: string) => {
-    movePieceToLayerIndex(pieceId, 0)
+  const rotatePieceById = (pieceId: string) => {
+    commitDoc((doc) => ({
+      ...doc,
+      pieces: doc.pieces.map((piece) =>
+        piece.id === pieceId
+          ? {
+              ...piece,
+              rotation: ((piece.rotation ?? 0) + 15) % 360,
+            }
+          : piece,
+      ),
+    }))
     setSelectedPieceId(pieceId)
   }
 
@@ -1289,18 +1343,6 @@ export function StudioPage() {
           aria-label="Hand"
         >
           <img src="/images/tool-hand.svg" alt="" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={tool === 'scissors' ? 'tool-button icon-only active' : 'tool-button icon-only'}
-          onClick={() => {
-            setTool('scissors')
-            setStatusMessage('Schere aktiv: auf dem Bild ziehen und loslassen, dann wird ausgeschnitten.')
-          }}
-          title="Schere"
-          aria-label="Schere"
-        >
-          <img src="/images/tool-scissors.svg" alt="" aria-hidden="true" />
         </button>
         {tool === 'scissors' ? (
           <>
@@ -1371,15 +1413,6 @@ export function StudioPage() {
         <button
           type="button"
           className="tool-button icon-only"
-          onClick={() => setCamera({ x: 0, y: 0, scale: 1 })}
-          title="Ansicht reset"
-          aria-label="Ansicht reset"
-        >
-          <img src="/images/tool-reset.svg" alt="" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="tool-button icon-only"
           onClick={exportAsPng}
           title="Als PNG speichern"
           aria-label="Als PNG speichern"
@@ -1398,28 +1431,51 @@ export function StudioPage() {
         </button>
       </section>
       {statusMessage ? <p className="status-text">{statusMessage}</p> : null}
-      <p className="zoom-hint">PC-Tipp: Zoomen nur mit Strg/Cmd + Mausrad. Ohne Taste scrollst du normal.</p>
+      <p className="zoom-hint">Zoom nur mit den +/− Buttons. Scrollen ueber dem Canvas bewegt die Seite.</p>
 
       <section className="studio-layout">
-        <aside className="panel left-panel">
-          <h3>Kategorien</h3>
+        <aside className="panel left-panel ipad-assets-panel">
+          <h3>Kategorien & Bauteile</h3>
+          <p className="muted-text">Links waehlen, rechts sofort auf dem Gesicht platzieren.</p>
           <div className="category-list">
             {CATEGORIES.map((category) => {
+              const items = libraryStore.items.filter((item) => item.category === category.id)
               const isActive = activeCategory === category.id
-              const count = libraryStore.items.filter((item) => item.category === category.id).length
               return (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={isActive ? 'category-button active' : 'category-button'}
-                  onClick={() => setActiveCategory(category.id)}
-                >
-                  <span className="category-icon">
-                    <img src={category.iconImageUrl} alt={category.label} loading="lazy" />
-                  </span>
-                  <span>{category.label}</span>
-                  <span className="count-pill">{count}</span>
-                </button>
+                <div key={category.id} className="category-dropdown-block">
+                  <button
+                    type="button"
+                    className={isActive ? 'category-button active' : 'category-button'}
+                    onClick={() => setActiveCategory(category.id)}
+                  >
+                    <span className="category-icon">
+                      <img src={category.iconImageUrl} alt={category.label} loading="lazy" />
+                    </span>
+                    <span>{category.label}</span>
+                    <span className="count-pill">{items.length}</span>
+                  </button>
+                  {isActive ? (
+                    <div className="category-dropdown">
+                      {items.length === 0 ? (
+                        <p className="muted-text">Keine Bilder in dieser Kategorie.</p>
+                      ) : (
+                        <div className="category-thumb-grid">
+                          {items.map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className="category-thumb-item"
+                              onClick={() => addPieceFromLibrary(item)}
+                            >
+                              <img src={item.thumbUrl} alt={item.title} loading="lazy" />
+                              <span>{item.title}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               )
             })}
           </div>
@@ -1470,7 +1526,8 @@ export function StudioPage() {
           </div>
         </aside>
 
-        <div className={tool === 'scissors' ? 'stage-wrap scissors-mode' : 'stage-wrap'} ref={stageContainerRef}>
+        <div className="canvas-column">
+          <div className={tool === 'scissors' ? 'stage-wrap scissors-mode' : 'stage-wrap'} ref={stageContainerRef}>
           <Stage
             ref={stageRef}
             width={stageSize.width}
@@ -1479,7 +1536,6 @@ export function StudioPage() {
             onPointerMove={onStagePointerMove}
             onPointerUp={onStagePointerUp}
             onPointerLeave={onStagePointerUp}
-            onWheel={onWheel}
           >
             <Layer x={camera.x} y={camera.y} scaleX={camera.scale} scaleY={camera.scale}>
               <Rect
@@ -1500,9 +1556,7 @@ export function StudioPage() {
                 listening={false}
               />
               <HeadGuide shapeId={historyState.doc.headShape} area={headArea} />
-              {[...historyState.doc.pieces]
-                .sort((a, b) => (a.id === effectiveSelectedPieceId ? 1 : b.id === effectiveSelectedPieceId ? -1 : 0))
-                .map((piece) => (
+              {historyState.doc.pieces.map((piece) => (
                 <PieceNode
                   key={piece.id}
                   piece={piece}
@@ -1516,12 +1570,17 @@ export function StudioPage() {
                   onDragEnd={movePiece}
                   onTransformEnd={transformPiece}
                   onDelete={deletePieceById}
+                  onMoveLayerUp={movePieceOneLayerUpById}
+                  onMoveLayerDown={movePieceOneLayerDownById}
+                  onRotatePiece={rotatePieceById}
+                  canMoveLayerUp={piece.id === effectiveSelectedPieceId && canMoveSelectedPieceUp}
+                  canMoveLayerDown={piece.id === effectiveSelectedPieceId && canMoveSelectedPieceDown}
                 />
               ))}
               {tool === 'hand' && !isExportingImage ? (
                 <Transformer
                   ref={transformerRef}
-                  rotateEnabled={false}
+                  rotateEnabled
                   flipEnabled={false}
                   keepRatio
                   enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
@@ -1529,6 +1588,7 @@ export function StudioPage() {
                   anchorSize={15}
                   anchorFill="#ffffff"
                   anchorStroke="#0d8f6f"
+                  rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
                 />
               ) : null}
               {scissorPoints.length > 1 && !isExportingImage ? (
@@ -1578,84 +1638,9 @@ export function StudioPage() {
               ) : null}
             </Layer>
           </Stage>
-        </div>
-
-        <aside className="panel right-panel">
-          <h3>Ebenen ({historyState.doc.pieces.length})</h3>
-          <p className="muted-text">Oben in der Liste liegt vorne auf der Leinwand.</p>
-          {layersTopFirst.length === 0 ? (
-            <p className="muted-text">Noch keine Teile auf der Leinwand.</p>
-          ) : (
-            <div className="layer-list">
-              {layersTopFirst.map(({ piece, index, displayOrder }) => {
-                const canMoveUp = index < historyState.doc.pieces.length - 1
-                const canMoveDown = index > 0
-                const isActive = piece.id === effectiveSelectedPieceId
-
-                return (
-                  <div key={piece.id} className={isActive ? 'layer-row active' : 'layer-row'}>
-                    <button
-                      type="button"
-                      className="layer-select"
-                      onClick={() => {
-                        setSelectedPieceId(piece.id)
-                        setTool('hand')
-                      }}
-                    >
-                      <span className="layer-title">{piece.title}</span>
-                      <span className="layer-meta">Ebene {displayOrder}</span>
-                    </button>
-                    <div className="layer-controls">
-                      <button
-                        type="button"
-                        title="Eine Ebene nach vorne"
-                        onClick={() => movePieceOneLayerUpById(piece.id)}
-                        disabled={!canMoveUp}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        title="Eine Ebene nach hinten"
-                        onClick={() => movePieceOneLayerDownById(piece.id)}
-                        disabled={!canMoveDown}
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        title="Ganz nach vorne"
-                        onClick={() => movePieceToFrontById(piece.id)}
-                        disabled={!canMoveUp}
-                      >
-                        Top
-                      </button>
-                      <button
-                        type="button"
-                        title="Ganz nach hinten"
-                        onClick={() => movePieceToBackById(piece.id)}
-                        disabled={!canMoveDown}
-                      >
-                        Unten
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          <h3>Bauteile ({categoryItems.length})</h3>
-          <p className="muted-text">Tippe auf ein Bild, dann kommt es direkt auf die Arbeitsflaeche.</p>
-          <div className="thumb-grid">
-            {categoryItems.map((item) => (
-              <button key={item.id} type="button" className="thumb-item" onClick={() => addPieceFromLibrary(item)}>
-                <img src={item.thumbUrl} alt={item.title} loading="lazy" />
-                <span>{item.title}</span>
-              </button>
-            ))}
           </div>
-        </aside>
+
+        </div>
       </section>
     </main>
   )

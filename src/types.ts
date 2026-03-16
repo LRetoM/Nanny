@@ -57,6 +57,7 @@ export interface StudioPiece {
   width: number
   height: number
   scale: number
+  rotation?: number
   clipPoints?: number[]
 }
 
