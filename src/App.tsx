@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 const StudioPage = lazy(async () => {
   const module = await import('./pages/StudioPage')
@@ -19,14 +19,7 @@ function App() {
           <span className="brand-badge">Kids Collage Lab</span>
           <h1>Gesichter bauen mit Schnipseln</h1>
         </div>
-        <nav className="topnav" aria-label="Navigation">
-          <NavLink to="/" end className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
-            Studio
-          </NavLink>
-          <NavLink to="/admin" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
-            Admin
-          </NavLink>
-        </nav>
+
       </header>
 
       <Suspense fallback={<div className="route-loading">Lade Ansicht...</div>}>

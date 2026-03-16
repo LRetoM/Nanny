@@ -4,7 +4,6 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import type { Stage as KonvaStage } from 'konva/lib/Stage'
 import type { Transformer as KonvaTransformer } from 'konva/lib/shapes/Transformer'
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva'
-import { Link } from 'react-router-dom'
 import {
   CATEGORIES,
   type AssetCategory,
@@ -304,6 +303,8 @@ function PieceNode({
   const image = useLoadedImage(piece.imageUrl)
   const trashIcon = useLoadedImage('/images/tool-trash.svg')
   const clipPoints = piece.clipPoints ?? []
+  const BTN = 36
+  const GAP = 6
 
   return (
     <Group
@@ -363,8 +364,10 @@ function PieceNode({
           />
           {tool === 'hand' ? (
             <Group
-              x={piece.width + 14}
-              y={-62}
+              x={piece.width + GAP / piece.scale}
+              y={-(BTN + GAP) / piece.scale}
+              scaleX={1 / piece.scale}
+              scaleY={1 / piece.scale}
               onPointerDown={(event) => {
                 event.cancelBubble = true
               }}
@@ -378,20 +381,20 @@ function PieceNode({
               }}
             >
               <Rect
-                width={56}
-                height={56}
-                cornerRadius={16}
+                width={BTN}
+                height={BTN}
+                cornerRadius={10}
                 fill="#fff2ef"
                 stroke="#cc4e3a"
-                strokeWidth={2.8}
+                strokeWidth={2}
                 shadowColor="#7f1f10"
                 shadowBlur={8}
-                shadowOpacity={0.2}
+                shadowOpacity={0.25}
               />
               {trashIcon ? (
-                <KonvaImage image={trashIcon} x={11} y={11} width={34} height={34} />
+                <KonvaImage image={trashIcon} x={4} y={4} width={28} height={28} />
               ) : (
-                <Text text="🗑" x={14} y={10} fontSize={30} />
+                <Text text="🗑" x={5} y={4} fontSize={26} />
               )}
             </Group>
           ) : null}
@@ -1270,19 +1273,8 @@ export function StudioPage() {
         <h2>Kinder-Studio</h2>
         <p>
           Hand-Werkzeug zum Bewegen, Schere zum Ausschneiden, Undo fuer mehrere Schritte und PNG-Export am Ende.
-          Fuer neue Bilder zuerst in <Link to="/admin">/admin</Link> suchen und freigeben.
         </p>
       </section>
-
-      {!hasLibraryContent ? (
-        <section className="empty-library">
-          <h3>Noch keine freigegebenen Bilder</h3>
-          <p>Bitte im Admin-Bereich Bilder suchen und speichern, dann erscheinen sie hier automatisch.</p>
-          <Link to="/admin" className="primary-link">
-            Zu /admin
-          </Link>
-        </section>
-      ) : null}
 
       <section className="studio-toolbar">
         <button
@@ -1510,7 +1502,9 @@ export function StudioPage() {
                 listening={false}
               />
               <HeadGuide shapeId={historyState.doc.headShape} area={headArea} />
-              {historyState.doc.pieces.map((piece) => (
+              {[...historyState.doc.pieces]
+                .sort((a, b) => (a.id === effectiveSelectedPieceId ? 1 : b.id === effectiveSelectedPieceId ? -1 : 0))
+                .map((piece) => (
                 <PieceNode
                   key={piece.id}
                   piece={piece}
@@ -1533,10 +1527,8 @@ export function StudioPage() {
                   flipEnabled={false}
                   keepRatio
                   enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
-                  borderDash={[6, 5]}
-                  borderStrokeWidth={2.4}
+                  borderEnabled={false}
                   anchorSize={15}
-                  borderStroke="#0d8f6f"
                   anchorFill="#ffffff"
                   anchorStroke="#0d8f6f"
                 />
