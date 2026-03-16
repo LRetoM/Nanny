@@ -1,9 +1,10 @@
 import { STORAGE_KEY } from '../constants'
 import type { LibraryImage, LibraryStore } from '../types'
+import { SEED_IMAGES } from './seedData'
 
 const DEFAULT_STORE: LibraryStore = {
   version: 1,
-  items: [],
+  items: SEED_IMAGES,
 }
 
 export function loadLibraryStore(): LibraryStore {
