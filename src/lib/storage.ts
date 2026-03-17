@@ -1,9 +1,9 @@
 import { STORAGE_KEY } from '../constants'
 import type { LibraryImage, LibraryStore } from '../types'
-import { SEED_IMAGES } from './seedData'
+import { SEED_IMAGES, SEED_VERSION } from './seedData'
 
 const DEFAULT_STORE: LibraryStore = {
-  version: 1,
+  version: SEED_VERSION,
   items: SEED_IMAGES,
 }
 
@@ -18,9 +18,23 @@ export function loadLibraryStore(): LibraryStore {
     if (!Array.isArray(parsed.items)) {
       return DEFAULT_STORE
     }
+
+    const validItems = parsed.items.filter((item) => Boolean(item?.id && item?.sourceUrl))
+
+    // Merge in any seed images that are missing (new ones added since last visit)
+    const storedVersion = parsed.version ?? 1
+    if (storedVersion < SEED_VERSION) {
+      const storedIds = new Set(validItems.map((item) => item.id))
+      const newSeedItems = SEED_IMAGES.filter((seed) => !storedIds.has(seed.id))
+      const mergedItems = [...newSeedItems, ...validItems]
+      const next: LibraryStore = { version: SEED_VERSION, items: mergedItems }
+      saveLibraryStore(next)
+      return next
+    }
+
     return {
-      version: 1,
-      items: parsed.items.filter((item) => Boolean(item?.id && item?.sourceUrl)),
+      version: SEED_VERSION,
+      items: validItems,
     }
   } catch {
     return DEFAULT_STORE
