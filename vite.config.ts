@@ -1,11 +1,14 @@
 import fs from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 
 const LOCAL_ASSET_PREFIX = '/images/admin-assets/'
 const MAX_REQUEST_BODY_BYTES = 28 * 1024 * 1024
+const execFileAsync = promisify(execFile)
 
 interface SaveAssetPayload {
   category: string
@@ -117,6 +120,12 @@ async function deleteManagedFile(publicDir: string, managedRoot: string, managed
   }
 }
 
+async function runSeedGeneration(rootDir: string): Promise<void> {
+  await execFileAsync(process.execPath, ['scripts/generate-seed-data.mjs'], {
+    cwd: rootDir,
+  })
+}
+
 function createLocalAssetPlugin(): Plugin {
   const registerMiddleware = (
     rootDir: string,
@@ -186,6 +195,8 @@ function createLocalAssetPlugin(): Plugin {
             await deleteManagedFile(publicDir, managedRoot, previousManagedPath)
           }
 
+          await runSeedGeneration(rootDir)
+
           sendJson(res, 200, {
             url: `${LOCAL_ASSET_PREFIX}${safeCategory}/${filename}`,
           })
@@ -208,6 +219,8 @@ function createLocalAssetPlugin(): Plugin {
           deletedCount += 1
         }
 
+        await runSeedGeneration(rootDir)
+
         sendJson(res, 200, { deleted: deletedCount })
       } catch (error) {
         if (error instanceof Error && error.message === 'REQUEST_TOO_LARGE') {
@@ -222,10 +235,15 @@ function createLocalAssetPlugin(): Plugin {
 
   return {
     name: 'local-admin-asset-storage',
+    async buildStart() {
+      await runSeedGeneration(process.cwd())
+    },
     configureServer(server) {
+      void runSeedGeneration(server.config.root)
       registerMiddleware(server.config.root, server.middlewares.use.bind(server.middlewares))
     },
     configurePreviewServer(server) {
+      void runSeedGeneration(server.config.root)
       registerMiddleware(server.config.root, server.middlewares.use.bind(server.middlewares))
     },
   }

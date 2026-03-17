@@ -537,6 +537,7 @@ export function StudioPage() {
   const transformerRef = useRef<KonvaTransformer | null>(null)
   const pieceNodeRefs = useRef<Record<string, KonvaGroup | null>>({})
   const stageContainerRef = useRef<HTMLDivElement | null>(null)
+  const toolRef = useRef<ToolMode>('hand')
   const scissorCloseDistanceRef = useRef<number>(SCISSOR_CLOSE_DISTANCE_MOUSE)
   const currentDocRef = useRef<StudioDoc>(INITIAL_DOC)
   const isCutProcessingRef = useRef(false)
@@ -1095,6 +1096,33 @@ export function StudioPage() {
     }
   }
 
+  const onStageWheel = (event: KonvaEventObject<WheelEvent>) => {
+    if (toolRef.current !== 'scissors') {
+      return
+    }
+    event.evt.preventDefault()
+    const stage = stageRef.current
+    if (!stage) {
+      return
+    }
+    const pointer = stage.getPointerPosition()
+    if (!pointer) {
+      return
+    }
+    const scaleBy = 1.08
+    const direction = event.evt.deltaY < 0 ? 1 : -1
+    setCamera((prev) => {
+      const nextScale = clamp(prev.scale * Math.pow(scaleBy, direction), 0.3, 6)
+      const worldX = (pointer.x - prev.x) / prev.scale
+      const worldY = (pointer.y - prev.y) / prev.scale
+      return {
+        scale: nextScale,
+        x: pointer.x - worldX * nextScale,
+        y: pointer.y - worldY * nextScale,
+      }
+    })
+  }
+
   const onStagePointerDown = (event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>) => {
     const stage = stageRef.current
     if (!stage) {
@@ -1136,6 +1164,7 @@ export function StudioPage() {
   selectedPieceIdRef.current = effectiveSelectedPieceId
   isDrawingScissorRef.current = isDrawingScissor
   stageSizeRef.current = stageSize
+  toolRef.current = tool
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1390,7 +1419,7 @@ export function StudioPage() {
         </button>
       </section>
       {statusMessage ? <p className="status-text">{statusMessage}</p> : null}
-      <p className="zoom-hint">Zoom nur mit den +/− Buttons. Scrollen ueber dem Canvas bewegt die Seite.</p>
+      <p className="zoom-hint">Im Scheren-Modus: Scrollrad auf dem Canvas zum Heranzoomen. Sonst: +/− Buttons.</p>
 
       <section className="studio-layout">
         <aside className="panel left-panel ipad-assets-panel">
@@ -1495,6 +1524,7 @@ export function StudioPage() {
             onPointerMove={onStagePointerMove}
             onPointerUp={onStagePointerUp}
             onPointerLeave={onStagePointerUp}
+            onWheel={onStageWheel}
           >
             <Layer x={camera.x} y={camera.y} scaleX={camera.scale} scaleY={camera.scale}>
               <Rect

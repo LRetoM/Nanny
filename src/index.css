@@ -534,8 +534,35 @@ a {
 .crop-stage-wrap {
   border-radius: 14px;
   border: 2px solid #eadfcb;
-  overflow: auto;
+  overflow: hidden;
   background: #fff8e8;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.crop-stage-wrap.scissors-mode {
+  cursor: crosshair;
+}
+
+.crop-stage-wrap.hand-mode {
+  cursor: grab;
+}
+
+.crop-stage-wrap.hand-mode:active {
+  cursor: grabbing;
+}
+
+.crop-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.crop-toolbar-hint {
+  color: #5f6763;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .crop-actions {
@@ -734,6 +761,8 @@ a {
 }
 
 .stage-wrap.scissors-mode {
+  touch-action: none;
+  overscroll-behavior: none;
   cursor:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Ccircle cx='14' cy='14' r='11' fill='white' fill-opacity='0.85' stroke='%23e06a2f' stroke-width='2'/%3E%3Cpath d='M14 5v18M5 14h18' stroke='%230f1512' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E")
       14 14,

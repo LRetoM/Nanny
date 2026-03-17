@@ -2,6 +2,8 @@ import { STORAGE_KEY } from '../constants'
 import type { LibraryImage, LibraryStore } from '../types'
 import { SEED_IMAGES, SEED_VERSION } from './seedData'
 
+const MANAGED_LOCAL_ASSET_PREFIX = '/images/admin-assets/'
+
 const DEFAULT_STORE: LibraryStore = {
   version: SEED_VERSION,
   items: SEED_IMAGES,
@@ -20,21 +22,30 @@ export function loadLibraryStore(): LibraryStore {
     }
 
     const validItems = parsed.items.filter((item) => Boolean(item?.id && item?.sourceUrl))
+    const seedIds = new Set(SEED_IMAGES.map((item) => item.id))
+    const preservedCustomItems = validItems.filter((item) => {
+      if (seedIds.has(item.id)) {
+        return false
+      }
+      return !item.sourceUrl.startsWith(MANAGED_LOCAL_ASSET_PREFIX)
+    })
+    const nextItems = [...preservedCustomItems, ...SEED_IMAGES]
 
-    // Merge in any seed images that are missing (new ones added since last visit)
     const storedVersion = parsed.version ?? 1
-    if (storedVersion < SEED_VERSION) {
-      const storedIds = new Set(validItems.map((item) => item.id))
-      const newSeedItems = SEED_IMAGES.filter((seed) => !storedIds.has(seed.id))
-      const mergedItems = [...newSeedItems, ...validItems]
-      const next: LibraryStore = { version: SEED_VERSION, items: mergedItems }
+    const needsResync =
+      storedVersion !== SEED_VERSION ||
+      nextItems.length !== validItems.length ||
+      SEED_IMAGES.some((seed, index) => validItems[preservedCustomItems.length + index]?.id !== seed.id)
+
+    if (needsResync) {
+      const next: LibraryStore = { version: SEED_VERSION, items: nextItems }
       saveLibraryStore(next)
       return next
     }
 
     return {
       version: SEED_VERSION,
-      items: validItems,
+      items: nextItems,
     }
   } catch {
     return DEFAULT_STORE

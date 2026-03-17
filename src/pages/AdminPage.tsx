@@ -53,6 +53,8 @@ const MIN_CROP_POINTS = 3
 const DRAW_POINT_DISTANCE = 3
 const CROP_CLOSE_DISTANCE = 30
 
+type CropToolMode = 'scissors' | 'hand'
+
 function formatCount(items: LibraryImage[], category: AssetCategory): string {
   return String(items.filter((item) => item.category === category).length)
 }
@@ -262,8 +264,12 @@ export function AdminPage() {
   const [isDrawingCrop, setIsDrawingCrop] = useState(false)
   const [isSavingCrop, setIsSavingCrop] = useState(false)
   const [cropMessage, setCropMessage] = useState<string | null>(null)
+  const [cropCamera, setCropCamera] = useState({ x: 0, y: 0, scale: 1 })
+  const [cropTool, setCropTool] = useState<CropToolMode>('scissors')
+  const [isPanningCrop, setIsPanningCrop] = useState(false)
 
   const cropStageRef = useRef<KonvaStage | null>(null)
+  const cropPanStartRef = useRef<{ x: number; y: number; cameraX: number; cameraY: number } | null>(null)
   const cropImage = useLoadedImage(cropSession?.sourceUrl ?? '')
 
   const itemsForCategory = useMemo(
@@ -292,8 +298,8 @@ export function AdminPage() {
     if (cropPoints.length < MIN_CROP_POINTS) {
       return false
     }
-    return distance(cropPoints[0], cropPoints[cropPoints.length - 1]) <= CROP_CLOSE_DISTANCE
-  }, [cropPoints])
+    return distance(cropPoints[0], cropPoints[cropPoints.length - 1]) * cropCamera.scale <= CROP_CLOSE_DISTANCE
+  }, [cropCamera.scale, cropPoints])
 
   useEffect(() => {
     if (!cropSession) {
@@ -301,8 +307,12 @@ export function AdminPage() {
     }
     setCropTitle(cropSession.title)
     setCropPoints([])
-    setCropMessage('Schere aktiv: Bereich umranden, dann "Ausschnitt speichern".')
+    setCropCamera({ x: 0, y: 0, scale: 1 })
+    setCropTool('scissors')
+    setCropMessage('Schere aktiv: Bereich umranden, Scrollrad zum Zoomen, Hand zum Verschieben.')
     setIsDrawingCrop(false)
+    setIsPanningCrop(false)
+    cropPanStartRef.current = null
   }, [cropSession])
 
   const runSearch = async (event?: FormEvent) => {
@@ -552,17 +562,35 @@ export function AdminPage() {
     if (!stage || !pointer) {
       return
     }
-    if (!isPointInsideRect(pointer, cropFrame)) {
+
+    if (cropTool === 'hand') {
+      event.evt.preventDefault()
+      setIsPanningCrop(true)
+      cropPanStartRef.current = {
+        x: pointer.x,
+        y: pointer.y,
+        cameraX: cropCamera.x,
+        cameraY: cropCamera.y,
+      }
+      setCropMessage('Hand aktiv: Bild verschieben, um den gewuenschten Bereich zu fokussieren.')
+      return
+    }
+
+    const worldPoint = {
+      x: (pointer.x - cropCamera.x) / cropCamera.scale,
+      y: (pointer.y - cropCamera.y) / cropCamera.scale,
+    }
+    if (!isPointInsideRect(worldPoint, cropFrame)) {
       return
     }
     event.evt.preventDefault()
     setIsDrawingCrop(true)
-    setCropPoints([pointer])
+    setCropPoints([worldPoint])
     setCropMessage('Zeichnen... Linie am Ende moeglichst wieder zum Startpunkt fuehren.')
   }
 
   const handleCropPointerMove = () => {
-    if (!cropSession || !cropImage || !isDrawingCrop) {
+    if (!cropSession || !cropImage) {
       return
     }
     const stage = cropStageRef.current
@@ -571,21 +599,69 @@ export function AdminPage() {
       return
     }
 
+    if (cropTool === 'hand' && isPanningCrop && cropPanStartRef.current) {
+      const panStart = cropPanStartRef.current
+      setCropCamera((previous) => ({
+        ...previous,
+        x: panStart.cameraX + (pointer.x - panStart.x),
+        y: panStart.cameraY + (pointer.y - panStart.y),
+      }))
+      return
+    }
+
+    if (!isDrawingCrop) {
+      return
+    }
+
+    const worldPoint = {
+      x: (pointer.x - cropCamera.x) / cropCamera.scale,
+      y: (pointer.y - cropCamera.y) / cropCamera.scale,
+    }
     const clampedPoint = {
-      x: clamp(pointer.x, cropFrame.x, cropFrame.x + cropFrame.width),
-      y: clamp(pointer.y, cropFrame.y, cropFrame.y + cropFrame.height),
+      x: clamp(worldPoint.x, cropFrame.x, cropFrame.x + cropFrame.width),
+      y: clamp(worldPoint.y, cropFrame.y, cropFrame.y + cropFrame.height),
     }
 
     setCropPoints((previous) => {
       const last = previous[previous.length - 1]
-      if (last && distance(last, clampedPoint) < DRAW_POINT_DISTANCE) {
+      if (last && distance(last, clampedPoint) * cropCamera.scale < DRAW_POINT_DISTANCE) {
         return previous
       }
       return [...previous, clampedPoint]
     })
   }
 
+  const handleCropWheel = (event: KonvaEventObject<WheelEvent>) => {
+    event.evt.preventDefault()
+    const stage = cropStageRef.current
+    if (!stage) {
+      return
+    }
+    const pointer = stage.getPointerPosition()
+    if (!pointer) {
+      return
+    }
+    const scaleBy = 1.1
+    const direction = event.evt.deltaY < 0 ? 1 : -1
+    setCropCamera((prev) => {
+      const nextScale = clamp(prev.scale * Math.pow(scaleBy, direction), 0.4, 8)
+      const worldX = (pointer.x - prev.x) / prev.scale
+      const worldY = (pointer.y - prev.y) / prev.scale
+      return {
+        scale: nextScale,
+        x: pointer.x - worldX * nextScale,
+        y: pointer.y - worldY * nextScale,
+      }
+    })
+  }
+
   const handleCropPointerUp = () => {
+    if (cropTool === 'hand') {
+      setIsPanningCrop(false)
+      cropPanStartRef.current = null
+      return
+    }
+
     if (!isDrawingCrop) {
       return
     }
@@ -680,6 +756,13 @@ export function AdminPage() {
 
   const cropStartPoint = cropPoints.length > 0 ? cropPoints[0] : null
   const cropLastPoint = cropPoints.length > 0 ? cropPoints[cropPoints.length - 1] : null
+  const cropOverlayStrokeDark = 10 / cropCamera.scale
+  const cropOverlayStrokeMain = 7 / cropCamera.scale
+  const cropOverlayGuideStroke = 3 / cropCamera.scale
+  const cropOverlayStartRadius = (cropCanClose ? 11 : 9) / cropCamera.scale
+  const cropOverlayStartStroke = 2 / cropCamera.scale
+  const cropOverlayDashMain = [16 / cropCamera.scale, 10 / cropCamera.scale]
+  const cropOverlayDashGuide = [6 / cropCamera.scale, 8 / cropCamera.scale]
 
   return (
     <main className="page admin-page">
@@ -858,7 +941,36 @@ export function AdminPage() {
               <input value={cropTitle} onChange={(event) => setCropTitle(event.target.value)} />
             </label>
 
-            <div className="crop-stage-wrap">
+            <div className="crop-toolbar" role="toolbar" aria-label="Werkzeuge fuer die Schere">
+              <button
+                type="button"
+                className={cropTool === 'scissors' ? 'tool-button active' : 'tool-button'}
+                onClick={() => {
+                  setCropTool('scissors')
+                  setIsPanningCrop(false)
+                  cropPanStartRef.current = null
+                  setCropMessage('Schere aktiv: Bereich umranden, Scrollrad zum Zoomen.')
+                }}
+              >
+                ✂️ Schere
+              </button>
+              <button
+                type="button"
+                className={cropTool === 'hand' ? 'tool-button active' : 'tool-button'}
+                onClick={() => {
+                  setCropTool('hand')
+                  setIsDrawingCrop(false)
+                  setCropMessage('Hand aktiv: gezoomtes Bild verschieben, um Details genau zu treffen.')
+                }}
+              >
+                ✋ Hand
+              </button>
+              <span className="crop-toolbar-hint">
+                Scrollrad = Zoom, Hand = Verschieben, Schere = Ausschneiden
+              </span>
+            </div>
+
+            <div className={cropTool === 'hand' ? 'crop-stage-wrap hand-mode' : 'crop-stage-wrap scissors-mode'}>
               <Stage
                 ref={cropStageRef}
                 width={CROP_STAGE_WIDTH}
@@ -867,8 +979,9 @@ export function AdminPage() {
                 onPointerMove={handleCropPointerMove}
                 onPointerUp={handleCropPointerUp}
                 onPointerLeave={handleCropPointerUp}
+                onWheel={handleCropWheel}
               >
-                <Layer>
+                <Layer x={cropCamera.x} y={cropCamera.y} scaleX={cropCamera.scale} scaleY={cropCamera.scale}>
                   <Rect x={0} y={0} width={CROP_STAGE_WIDTH} height={CROP_STAGE_HEIGHT} fill="#fbf4e4" />
                   <Rect
                     x={cropFrame.x}
@@ -894,26 +1007,30 @@ export function AdminPage() {
                         points={cropPoints.flatMap((point) => [point.x, point.y])}
                         stroke="#49280f"
                         opacity={0.45}
-                        strokeWidth={10}
+                        strokeWidth={cropOverlayStrokeDark}
                         lineCap="round"
                         lineJoin="round"
+                        dashEnabled={false}
+                        strokeScaleEnabled={false}
                         listening={false}
                       />
                       <Line
                         points={cropPoints.flatMap((point) => [point.x, point.y])}
                         stroke="#f15a2a"
-                        strokeWidth={7}
+                        strokeWidth={cropOverlayStrokeMain}
                         lineCap="round"
                         lineJoin="round"
-                        dash={[16, 10]}
+                        dash={cropOverlayDashMain}
+                        strokeScaleEnabled={false}
                         listening={false}
                       />
                       {cropStartPoint && cropLastPoint ? (
                         <Line
                           points={[cropLastPoint.x, cropLastPoint.y, cropStartPoint.x, cropStartPoint.y]}
                           stroke={cropCanClose ? '#1f9d7d' : '#b58c3c'}
-                          strokeWidth={3}
-                          dash={[6, 8]}
+                          strokeWidth={cropOverlayGuideStroke}
+                          dash={cropOverlayDashGuide}
+                          strokeScaleEnabled={false}
                           listening={false}
                         />
                       ) : null}
@@ -923,10 +1040,11 @@ export function AdminPage() {
                     <Circle
                       x={cropStartPoint.x}
                       y={cropStartPoint.y}
-                      radius={cropCanClose ? 11 : 9}
+                      radius={cropOverlayStartRadius}
                       fill={cropCanClose ? '#def9ef' : '#fff6e4'}
                       stroke={cropCanClose ? '#1f9d7d' : '#d9a147'}
-                      strokeWidth={2}
+                      strokeWidth={cropOverlayStartStroke}
+                      strokeScaleEnabled={false}
                       listening={false}
                     />
                   ) : null}
@@ -935,6 +1053,48 @@ export function AdminPage() {
             </div>
 
             <div className="crop-actions">
+              <button
+                type="button"
+                className="tool-button"
+                onClick={() => {
+                  setCropCamera((prev) => {
+                    const nextScale = clamp(prev.scale * 1.3, 0.4, 8)
+                    const cx = CROP_STAGE_WIDTH / 2
+                    const cy = CROP_STAGE_HEIGHT / 2
+                    const worldX = (cx - prev.x) / prev.scale
+                    const worldY = (cy - prev.y) / prev.scale
+                    return { scale: nextScale, x: cx - worldX * nextScale, y: cy - worldY * nextScale }
+                  })
+                }}
+                title="Heranzoomen"
+              >
+                + Zoom
+              </button>
+              <button
+                type="button"
+                className="tool-button"
+                onClick={() => {
+                  setCropCamera((prev) => {
+                    const nextScale = clamp(prev.scale * 0.77, 0.4, 8)
+                    const cx = CROP_STAGE_WIDTH / 2
+                    const cy = CROP_STAGE_HEIGHT / 2
+                    const worldX = (cx - prev.x) / prev.scale
+                    const worldY = (cy - prev.y) / prev.scale
+                    return { scale: nextScale, x: cx - worldX * nextScale, y: cy - worldY * nextScale }
+                  })
+                }}
+                title="Herauszoomen"
+              >
+                − Zoom
+              </button>
+              <button
+                type="button"
+                className="tool-button"
+                onClick={() => setCropCamera({ x: 0, y: 0, scale: 1 })}
+                title="Zoom zuruecksetzen"
+              >
+                Zoom reset
+              </button>
               <button
                 type="button"
                 className="tool-button"

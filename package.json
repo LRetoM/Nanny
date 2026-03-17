@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "generate:seed": "node scripts/generate-seed-data.mjs",
+    "dev": "npm run generate:seed && vite",
+    "build": "npm run generate:seed && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
