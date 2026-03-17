@@ -47,7 +47,6 @@ interface PieceNodeProps {
   onDelete: (pieceId: string) => void
   onMoveLayerUp: (pieceId: string) => void
   onMoveLayerDown: (pieceId: string) => void
-  onRotatePiece: (pieceId: string) => void
   canMoveLayerUp: boolean
   canMoveLayerDown: boolean
 }
@@ -321,7 +320,6 @@ function PieceNode({
   onDelete,
   onMoveLayerUp,
   onMoveLayerDown,
-  onRotatePiece,
   canMoveLayerUp,
   canMoveLayerDown,
 }: PieceNodeProps) {
@@ -331,7 +329,7 @@ function PieceNode({
   const BTN = 36
   const GAP = 6
   const CONTROL_GAP = 6
-  const controlsWidth = BTN * 3 + CONTROL_GAP * 2
+  const controlsWidth = BTN * 2 + CONTROL_GAP
 
   return (
     <Group
@@ -426,30 +424,6 @@ function PieceNode({
                 </Group>
                 <Group
                   x={BTN + CONTROL_GAP}
-                  onClick={(event) => {
-                    event.cancelBubble = true
-                    onRotatePiece(piece.id)
-                  }}
-                  onTap={(event) => {
-                    event.cancelBubble = true
-                    onRotatePiece(piece.id)
-                  }}
-                >
-                  <Rect
-                    width={BTN}
-                    height={BTN}
-                    cornerRadius={10}
-                    fill="#eef7ff"
-                    stroke="#2d7db6"
-                    strokeWidth={2}
-                    shadowColor="#275676"
-                    shadowBlur={6}
-                    shadowOpacity={0.18}
-                  />
-                  <Text text="↻" x={8} y={4} fontSize={24} fill="#245f8a" />
-                </Group>
-                <Group
-                  x={BTN * 2 + CONTROL_GAP * 2}
                   onClick={(event) => {
                     event.cancelBubble = true
                     onMoveLayerDown(piece.id)
@@ -1301,21 +1275,6 @@ export function StudioPage() {
     setSelectedPieceId(pieceId)
   }
 
-  const rotatePieceById = (pieceId: string) => {
-    commitDoc((doc) => ({
-      ...doc,
-      pieces: doc.pieces.map((piece) =>
-        piece.id === pieceId
-          ? {
-              ...piece,
-              rotation: ((piece.rotation ?? 0) + 15) % 360,
-            }
-          : piece,
-      ),
-    }))
-    setSelectedPieceId(pieceId)
-  }
-
   const canMoveSelectedPieceUp = selectedPieceIndex >= 0 && selectedPieceIndex < historyState.doc.pieces.length - 1
   const canMoveSelectedPieceDown = selectedPieceIndex > 0
 
@@ -1324,7 +1283,7 @@ export function StudioPage() {
       <section className="info-card">
         <h2>Kinder-Studio</h2>
         <p>
-          Hand-Werkzeug zum Bewegen, Schere zum Ausschneiden, Undo fuer mehrere Schritte und PNG-Export am Ende.
+          Hand-Werkzeug zum Bewegen, Schere zum Ausschneiden, Undo für mehrere Schritte und PNG-Export am Ende.
         </p>
       </section>
 
@@ -1572,7 +1531,6 @@ export function StudioPage() {
                   onDelete={deletePieceById}
                   onMoveLayerUp={movePieceOneLayerUpById}
                   onMoveLayerDown={movePieceOneLayerDownById}
-                  onRotatePiece={rotatePieceById}
                   canMoveLayerUp={piece.id === effectiveSelectedPieceId && canMoveSelectedPieceUp}
                   canMoveLayerDown={piece.id === effectiveSelectedPieceId && canMoveSelectedPieceDown}
                 />
