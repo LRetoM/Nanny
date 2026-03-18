@@ -50,7 +50,6 @@ const CROP_STAGE_HEIGHT = 560
 const CROP_STAGE_PADDING = 24
 const MAX_STORED_IMAGE_EDGE = 900
 const MIN_CROP_POINTS = 3
-const DRAW_POINT_DISTANCE = 3
 const CROP_CLOSE_DISTANCE = 30
 
 type CropToolMode = 'scissors' | 'hand'
@@ -185,6 +184,59 @@ function mapStagePointToImage(point: Point, frame: RectFrame, imageWidth: number
 
 function isPointInsideRect(point: Point, rect: RectFrame): boolean {
   return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height
+}
+
+function smoothPathPoints(points: Point[], iterations: number): Point[] {
+  if (points.length < 3) {
+    return points
+  }
+
+  let current = [...points]
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const next: Point[] = [current[0]]
+    for (let index = 0; index < current.length - 1; index += 1) {
+      const start = current[index]
+      const end = current[index + 1]
+      next.push(
+        {
+          x: start.x * 0.75 + end.x * 0.25,
+          y: start.y * 0.75 + end.y * 0.25,
+        },
+        {
+          x: start.x * 0.25 + end.x * 0.75,
+          y: start.y * 0.25 + end.y * 0.75,
+        },
+      )
+    }
+    next.push(current[current.length - 1])
+    current = next
+  }
+
+  return current
+}
+
+function appendSmoothedScissorPoint(points: Point[], target: Point, cameraScale: number): Point[] {
+  if (points.length === 0) {
+    return [target]
+  }
+
+  const last = points[points.length - 1]
+  const previous = points.length > 1 ? points[points.length - 2] : last
+  const minDistance = Math.max(2.4, 5.5 / cameraScale)
+  if (distance(last, target) < minDistance) {
+    return points
+  }
+
+  const blended: Point = {
+    x: previous.x * 0.12 + last.x * 0.28 + target.x * 0.6,
+    y: previous.y * 0.12 + last.y * 0.28 + target.y * 0.6,
+  }
+
+  if (distance(last, blended) < minDistance * 0.66) {
+    return points
+  }
+
+  return [...points, blended]
 }
 
 function cutImageByPolygon(
@@ -583,10 +635,11 @@ export function AdminPage() {
     if (!isPointInsideRect(worldPoint, cropFrame)) {
       return
     }
+
     event.evt.preventDefault()
     setIsDrawingCrop(true)
     setCropPoints([worldPoint])
-    setCropMessage('Zeichnen... Linie am Ende moeglichst wieder zum Startpunkt fuehren.')
+    setCropMessage('Zeichnen... die Linie wird jetzt weicher und ruhiger geglaettet.')
   }
 
   const handleCropPointerMove = () => {
@@ -623,11 +676,7 @@ export function AdminPage() {
     }
 
     setCropPoints((previous) => {
-      const last = previous[previous.length - 1]
-      if (last && distance(last, clampedPoint) * cropCamera.scale < DRAW_POINT_DISTANCE) {
-        return previous
-      }
-      return [...previous, clampedPoint]
+      return appendSmoothedScissorPoint(previous, clampedPoint, cropCamera.scale)
     })
   }
 
@@ -682,7 +731,8 @@ export function AdminPage() {
       return
     }
 
-    const cutResult = cutImageByPolygon(cropImage, cropPoints, cropFrame)
+    const finalCropPoints = smoothPathPoints(cropPoints, 3)
+    const cutResult = cutImageByPolygon(cropImage, finalCropPoints, cropFrame)
     if (!cutResult || cutResult.width < 2 || cutResult.height < 2) {
       setCropMessage('Ausschnitt zu klein oder leer. Bitte einen groesseren Bereich waehlen.')
       return
@@ -756,6 +806,9 @@ export function AdminPage() {
 
   const cropStartPoint = cropPoints.length > 0 ? cropPoints[0] : null
   const cropLastPoint = cropPoints.length > 0 ? cropPoints[cropPoints.length - 1] : null
+  const previewCropPoints = useMemo(() => smoothPathPoints(cropPoints, 3), [cropPoints])
+  const previewStartPoint = previewCropPoints.length > 0 ? previewCropPoints[0] : cropStartPoint
+  const previewLastPoint = previewCropPoints.length > 0 ? previewCropPoints[previewCropPoints.length - 1] : cropLastPoint
   const cropOverlayStrokeDark = 10 / cropCamera.scale
   const cropOverlayStrokeMain = 7 / cropCamera.scale
   const cropOverlayGuideStroke = 3 / cropCamera.scale
@@ -949,7 +1002,7 @@ export function AdminPage() {
                   setCropTool('scissors')
                   setIsPanningCrop(false)
                   cropPanStartRef.current = null
-                  setCropMessage('Schere aktiv: Bereich umranden, Scrollrad zum Zoomen.')
+                  setCropMessage('Schere aktiv: weichere Linienfuehrung, Scrollrad zum Zoomen.')
                 }}
               >
                 ✂️ Schere
@@ -966,7 +1019,7 @@ export function AdminPage() {
                 ✋ Hand
               </button>
               <span className="crop-toolbar-hint">
-                Scrollrad = Zoom, Hand = Verschieben, Schere = Ausschneiden
+                Scrollrad = Zoom, Hand = Verschieben, Schere = weichere und geglaettete Freihandlinie
               </span>
             </div>
 
@@ -1001,10 +1054,10 @@ export function AdminPage() {
                       height={cropFrame.height}
                     />
                   ) : null}
-                  {cropPoints.length > 1 ? (
+                  {previewCropPoints.length > 1 ? (
                     <>
                       <Line
-                        points={cropPoints.flatMap((point) => [point.x, point.y])}
+                        points={previewCropPoints.flatMap((point) => [point.x, point.y])}
                         stroke="#49280f"
                         opacity={0.45}
                         strokeWidth={cropOverlayStrokeDark}
@@ -1012,21 +1065,23 @@ export function AdminPage() {
                         lineJoin="round"
                         dashEnabled={false}
                         strokeScaleEnabled={false}
+                        tension={0.55}
                         listening={false}
                       />
                       <Line
-                        points={cropPoints.flatMap((point) => [point.x, point.y])}
+                        points={previewCropPoints.flatMap((point) => [point.x, point.y])}
                         stroke="#f15a2a"
                         strokeWidth={cropOverlayStrokeMain}
                         lineCap="round"
                         lineJoin="round"
                         dash={cropOverlayDashMain}
                         strokeScaleEnabled={false}
+                        tension={0.55}
                         listening={false}
                       />
-                      {cropStartPoint && cropLastPoint ? (
+                      {previewStartPoint && previewLastPoint ? (
                         <Line
-                          points={[cropLastPoint.x, cropLastPoint.y, cropStartPoint.x, cropStartPoint.y]}
+                          points={[previewLastPoint.x, previewLastPoint.y, previewStartPoint.x, previewStartPoint.y]}
                           stroke={cropCanClose ? '#1f9d7d' : '#b58c3c'}
                           strokeWidth={cropOverlayGuideStroke}
                           dash={cropOverlayDashGuide}
@@ -1036,10 +1091,10 @@ export function AdminPage() {
                       ) : null}
                     </>
                   ) : null}
-                  {cropStartPoint ? (
+                  {previewStartPoint ? (
                     <Circle
-                      x={cropStartPoint.x}
-                      y={cropStartPoint.y}
+                      x={previewStartPoint.x}
+                      y={previewStartPoint.y}
                       radius={cropOverlayStartRadius}
                       fill={cropCanClose ? '#def9ef' : '#fff6e4'}
                       stroke={cropCanClose ? '#1f9d7d' : '#d9a147'}
